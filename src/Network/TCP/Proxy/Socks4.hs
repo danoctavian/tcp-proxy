@@ -1,17 +1,28 @@
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE RankNTypes #-}
-
+{-# LANGUAGE ExistentialQuantification, RankNTypes, LambdaCase #-}
 module Network.TCP.Proxy.Socks4 where
 
-import Network.TCP.Proxy
+import Network.TCP.Proxy hiding (remoteAddr)
 import Data.List as L
 import Data.Serialize
 import Network.Socket as NS
 import Control.Applicative
 import Data.Word
 import Data.ByteString as BS
-import Data.Conduit.Cereal as DCC
 import Control.Monad.NetworkProtocol
+
+protocol = do
+  req <- recvMsg 
+  let defR = Response (version req)
+  -- for a reject resp or for a resp to connect request the addr field is ignored by client
+  let dummyAddr = SockAddrInet 0 0
+  if (version req == 4)
+  then return $ ProxyAction (cmd req) (Right (sockAddr req))
+        $ \case
+            Nothing -> do
+               sendMsg $ defR RequestRejected dummyAddr
+               throwException "connection to remote failed"
+            Just a -> sendMsg $ defR RequestGranted a
+  else sendMsg (defR RequestRejected dummyAddr) >> throwException "wrong version"
 
 data Request = Request {
     version :: Word8
@@ -19,12 +30,6 @@ data Request = Request {
   , sockAddr :: SockAddr
   , userid :: ByteString
  }
-
-protocol = do
-  req <- recvMsg 
-  if (version req == 4)
-  then undefined
-  else undefined -- Reject (send )
 
 -- identd behaviour not implemented
 data ResultCode = RequestGranted | RequestRejected 
@@ -35,10 +40,14 @@ instance Serialize ResultCode where
   put RequestRejected = putWord8 91
   get = undefined
 
+instance Serialize Response where
+  put (Response v code addr) = put v >> put code >> put addr
+  get = undefined
+
 -- serialize IPV4 only
 instance Serialize SockAddr where
   get = SockAddrInet <$> (fmap PortNum getWord16host) <*> getWord32host
-  put = undefined
+  put (SockAddrInet (PortNum p) ip) = putWord16host p >> putWord32host ip
 
 instance Serialize Request where
   get = Request <$> get <*> get <*> get <*> bsTakeWhile (/= 0)
@@ -62,47 +71,5 @@ byte w = do
     if x == w
         then getWord8
         else fail $ "Expected byte: '" ++ show w ++ "' got: '" ++ show x ++ "'"
-
-
-{-
-doSocks4Handshake :: GetConn
-doSocks4Handshake conn = do
-  connRequest <- getMessage conn parseSocks4Cmd (isValidSocks4Cmd, "invalid connect command"    )
-  liftIO $ NBS.sendAll conn  $ DB.concat ["\0\90", DB.replicate 6 0]
-  return connRequest
-
-getMessage conn parse (validate, errMsg) = do
-  tcpMsg <- liftIO $ NBS.recv conn msgSize
-  handshakeParse <- return (parseOnly parse tcpMsg)
-  hs <- case handshakeParse of
-          Left err -> CME.throwError "failed parse "
-          Right hs -> if (validate hs) then return hs else CME.throwError errMsg
-  return hs
-
-
-parseSocks4Cmd :: Parser Connection
-parseSocks4Cmd = do
-  versionByte <- anyChar
-  cmd <- fmap fromJust $ satisfyWith (toCMD . word8ToChar) maybeToBool
-  port <- anyWord16be
-
-  -- this is architecture specific... TODO: figure out endianess properly
-  address <- anyWord32le -- only IPV4
-  let terminator = 0
-  userid <- DA.takeTill (== terminator)
-  word8 terminator
-  let atyp = IPV4
-  return (Connection cmd atyp $ SockAddrInet (portNumberle port) address)
-
-parseHandshake :: Parser ClientHandshake
-parseHandshake = do
-  verB <- anyChar
-  methCount <- fmap ord anyChar
-  methods <- replicateM methCount anyChar
-  return $ CH verB methods
-
-isValidHandshake :: ClientHandshake -> Bool
-isValidHandshake (CH ver methods) = ver == (chr 5) && L.elem '\0' methods
--}
 
 

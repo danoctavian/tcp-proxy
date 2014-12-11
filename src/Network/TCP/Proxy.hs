@@ -4,6 +4,7 @@ module Network.TCP.Proxy (
   , DataHooks (..)
   , DataHook
   , Config (..)
+  , ProxyAction (..)
 ) where
 
 import Prelude as P
@@ -25,7 +26,11 @@ data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
 type DataHook = ByteString -> IO ByteString
 
 type InitHook = SockAddr -> SockAddr -> IO DataHooks 
-data Config = Config {proxyPort :: PortID, initHook :: InitHook, handshake :: Protocol ProxyAction, addrMap :: SockAddr -> SockAddr}
+data Config = Config {
+              proxyPort :: PortID
+            , initHook :: InitHook
+            , handshake :: Protocol ProxyAction
+            , addrMap :: SockAddr -> SockAddr}
 
 -- Currently the proxy only supports CONNECT commands
 -- TODO: implement BIND support
@@ -37,9 +42,9 @@ data ProxyAction = ProxyAction {
     command :: Command
   , remoteAddr :: RemoteAddr
    -- what to do when a remote connection is established
+   -- Nothing means it failed
   , onConnection :: (Maybe SockAddr -> Protocol ())
  } 
-  | Reject (Protocol())
 
 msgSize = 1024 -- magical? magical as fuck. may need more
 
