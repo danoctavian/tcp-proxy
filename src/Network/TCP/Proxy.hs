@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings, DeriveDataTypeable #-}
+
 module Network.TCP.Proxy (
     run
   , Command (..)
@@ -5,6 +7,7 @@ module Network.TCP.Proxy (
   , DataHook
   , Config (..)
   , ProxyAction (..)
+  , ProxyException (..)
 ) where
 
 import Prelude as P
@@ -12,11 +15,23 @@ import Network.Socket as NS
 import Network
 import Data.ByteString as BS
 import Control.Monad.IO.Class
+import Control.Monad.Trans.Either
+import Data.Either
 import Control.Concurrent
 import Control.Monad
 import System.Log.Logger
 import Data.Serialize as DS
 import Control.Monad.NetworkProtocol
+import Control.Monad.NetworkProtocol.Conduit
+import Data.Conduit
+import Data.Conduit.Network
+import Data.Streaming.Network
+import Data.Word
+import Control.Exception
+import Data.Typeable
+import Data.IP
+import Data.Streaming.Network
+import Network.TCP.Proxy.Common
 
 {-
   Proxy with hooks on connection and on incoming/outgoing data
@@ -26,67 +41,82 @@ data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
 type DataHook = ByteString -> IO ByteString
 
 type InitHook = SockAddr -> SockAddr -> IO DataHooks 
+
 data Config = Config {
-              proxyPort :: PortID
+              proxyPort :: Word16 
             , initHook :: InitHook
-            , handshake :: Protocol ProxyAction
-            , addrMap :: SockAddr -> SockAddr}
+            , handshake :: Protocol ProxyException ProxyAction
+            }
 
--- Currently the proxy only supports CONNECT commands
--- TODO: implement BIND support
-data Command = CONNECT | BIND
-  deriving Show
-
-type RemoteAddr = Either (HostName, PortNumber) SockAddr
+type RemoteAddr = (Either HostName IP, Word16)
 data ProxyAction = ProxyAction {
     command :: Command
   , remoteAddr :: RemoteAddr
    -- what to do when a remote connection is established
    -- Nothing means it failed
-  , onConnection :: (Maybe SockAddr -> Protocol ())
+  , onConnection :: (Maybe (IP, Word16) -> Protocol ProxyException ())
  } 
 
-msgSize = 1024 -- magical? magical as fuck. may need more
+data ProxyException = HandshakeException | UnsupportedFeature
+                    | ConnectionFailed 
+  deriving (Show, Typeable)
+instance Exception ProxyException
 
 logger = "tcp-proxy"
 
 run :: Config -> IO ()
-run config = withSocketsDo $  do
-  debugM logger $ "running proxy server on port " P.++ (show $ proxyPort config)
-  sock <- listenOn $ (proxyPort config)
-  loop config sock
-  return ()
+run config = runTCPServer (serverSettings (fromIntegral $ proxyPort config) "*")
+             $ handleWithExceptions config
 
-loop config serverSock
-  = forever $ NS.accept serverSock >>= liftIO . forkIO . (handleRequest config)
+handleWithExceptions config appData = do
+  res <- runEitherT $ handleConn config appData
+  case res of 
+    Left e -> errorM logger $ "failed with " P.++ (show e)
+    Right _ -> debugM logger "finished succesfully"
 
-handleRequest config (sock, addr) = do
-  debugM logger $ "handling request from " P.++ (show addr)
-  return ()
-{-
-  eitherConnRequest <- runErrorT $ (getConn config $ sock)
-  case eitherConnRequest of
-    Left err -> debugM Socks5Proxy.logger err 
-    Right c -> handleConnection c (sock, addr) config
-  -- TODO: add code for catching exceptions when connections is broken
-  debugM Socks5Proxy.logger "done showing"
-  Network.Socket.sClose sock
+-- TODO: implement bind
+handleConn config appData = do
+  let clientSrc = newResumableSource $ appSource appData    
+  (postHSSrc, handshakeResult) <-runConduit
+                              $ fuseProtocol clientSrc (appSink appData) (handshake config)
+  proxyAction <- hoistEither handshakeResult
+  case command proxyAction of
+    BIND -> do
+      left UnsupportedFeature
+    CONNECT -> do
+      let remote = remoteAddr proxyAction
+      connResult <- liftIO $ try' $ getSocketGen Stream
+                                   (showAddr . fst $ remote) (fromIntegral . snd $ remote)
+      -- perform onConnection protocol
+      (postConnSrc, afterConn) <- runConduit
+         $ fuseProtocol postHSSrc (appSink appData)
+            (onConnection proxyAction
+              $ eitherToMaybe $ fmap (sockAddrToIP . addrAddress . snd) connResult)
+      hoistEither afterConn
 
+      (socket, addrInfo) <- hoistEither $ mapLeft (\e -> ConnectionFailed) connResult
 
-fixAddr old@(SockAddrInet tport taddr) 
-  | taddr == 16777216 = SockAddrInet tport 16777343 -- magical 127.0.0.1
-  |otherwise = old
+      -- setup hooks
+      dataHooks <-liftIO $ initHook config (appSockAddr appData) (addrAddress addrInfo) 
+      return ()
+            
 
-handleConnection conn@(Connection cmd atyp unfixedAddr) (clientSock, clientAddr) config = do
-  let serverSockAddr = addrMap config unfixedAddr
+-- utils
 
-  serverSock <- socket (toAddressFamily atyp) Stream defaultProtocol --
-  debugM Socks5Proxy.logger $ "address is " ++ (show serverSockAddr)
-  connect serverSock serverSockAddr
-  handlers <- (initHook config) clientAddr serverSockAddr 
+try' :: IO a -> IO (Either SomeException a)
+try' = try
 
-  forkIO $ forwardPackets clientSock serverSock (outgoing handlers)
-  forwardPackets serverSock clientSock (incoming handlers)
-  return ()
+sockAddrToIP (SockAddrInet (PortNum p) a)
+  = (IPv4 .fromRight . decode . runPut . putWord32be $ a, p)
+sockAddrToIP (SockAddrInet6 (PortNum p) _ a _) = undefined -- (IPv6 $ toIPv4 $ , p)
 
--}
+showAddr (Left host) = host
+showAddr (Right ip) = show ip
+
+mapLeft f (Left v) = Left $ f v
+mapLeft f (Right v) = (Right v)
+
+fromRight (Right v) = v
+
+eitherToMaybe (Left _) = Nothing
+eitherToMaybe (Right v) = Just v
