@@ -12,10 +12,9 @@ module Network.TCP.Proxy (
 
 import Prelude as P
 import Network.Socket as NS
-import Network
 import Data.ByteString as BS
 import Control.Monad.IO.Class
-import Data.Either
+import Control.Monad.Trans.Class
 import Control.Concurrent
 import Control.Monad
 import System.Log.Logger
@@ -40,24 +39,26 @@ import Data.ByteString.Char8 as DBC
   Proxy with hooks on connection and on incoming/outgoing data
 -}
 
+type PortNum = Word16
 data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
 type DataHook = ByteString -> IO ByteString
 
-type InitHook = (IP, Word16) -> (IP, Word16) -> IO DataHooks 
+type InitHook = (IP, PortNum) -> (IP, PortNum) -> IO DataHooks 
 
 data Config = Config {
-              proxyPort :: Word16 
+              proxyPort :: PortNum 
             , initHook :: InitHook
             , handshake :: Protocol ProxyException ProxyAction
             }
 
-type RemoteAddr = (Either HostName IP, Word16)
+type RemoteAddr = (Either HostName IP, PortNum)
+
 data ProxyAction = ProxyAction {
     command :: Command
   , remoteAddr :: RemoteAddr
    -- what to do when a remote connection is established
    -- Nothing means it failed
-  , onConnection :: (Maybe (IP, Word16) -> Protocol ProxyException ())
+  , onConnection :: (Maybe (IP, PortNum) -> Protocol ProxyException ())
  } 
 
 data ProxyException = HandshakeException | UnsupportedFeature
@@ -76,7 +77,7 @@ run config = runTCPServer (serverSettings (fromIntegral $ proxyPort config) "*")
 handleConn :: Config -> AppData -> IO ()
 handleConn config appData = do
   let clientSrc = (newResumableSource $ appSource appData)
-  let clientSink = (appSink appData)
+  let clientSink = appSink appData
   (postHSSrc, handshakeResult) <- fuseProtocol clientSrc clientSink (handshake config)
   proxyAction <- hoistEitherIO handshakeResult
 
@@ -85,6 +86,7 @@ handleConn config appData = do
       throwIO UnsupportedFeature
     CONNECT -> do
       let remote = remoteAddr proxyAction
+      debugM logger $ "attempting connect to " P.++ (show remote)
       connResult <- try' $ getSocketTCP
                     (DBC.pack . showAddr . fst $ remote) (fromIntegral . snd $ remote)
       (do
@@ -103,12 +105,11 @@ handleConn config appData = do
         concurrently (pipeWithHook (outgoing dataHooks)  postConnSrc serverSink)
                      (pipeWithHook (incoming dataHooks) serverSrc clientSink)
         return ()
-        ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
+       ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
 
 pipeWithHook hook src dest = src $$+- (CL.mapM hook) =$ dest
 
 -- utils
-
 hoistEitherIO (Left e) = throwIO e
 hoistEitherIO (Right v) = return v
 

@@ -14,7 +14,7 @@ import Network.TCP.Proxy.Common
 
 protocol = do
   req <- recvMsg 
-  let defR = Response (version req)
+  let defR = Response 0
   -- for a reject resp or for a resp to connect request the addr field is ignored by client
   let dummyAddr = toIPv4 $ L.replicate ipv4Bytes 0
   if (version req == 4)
@@ -29,8 +29,8 @@ protocol = do
 data Request = Request {
     version :: Word8
   , cmd :: Command
-  , remoteIP :: IPv4
   , remotePort :: Word16
+  , remoteIP :: IPv4
   , userid :: ByteString
  }
 
@@ -49,7 +49,7 @@ instance Serialize Response where
   get = undefined
 
 instance Serialize Request where
-  get = Request <$> get <*> get <*> get <*> getWord16be <*> bsTakeWhile (/= 0)
+  get = Request <$> get <*> get <*> getWord16be <*> get <*> bsTakeWhile (/= 0)
   put = undefined
 
 
