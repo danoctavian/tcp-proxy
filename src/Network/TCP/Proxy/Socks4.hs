@@ -1,7 +1,7 @@
-{-# LANGUAGE ExistentialQuantification, RankNTypes, LambdaCase #-}
+{-# LANGUAGE ExistentialQuantification, RankNTypes, LambdaCase, OverloadedStrings #-}
 module Network.TCP.Proxy.Socks4 where
 
-import Network.TCP.Proxy hiding (remoteAddr)
+import Network.TCP.Proxy.Server hiding (remoteAddr)
 import Data.List as L
 import Data.Serialize
 import Network.Socket as NS
@@ -11,13 +11,22 @@ import Data.ByteString as BS
 import Control.Monad.NetworkProtocol
 import Data.IP
 import Network.TCP.Proxy.Common
+import Control.Monad
 
-protocol = do
+{-
+socks4 protocol according to 
+http://www.openssh.com/txt/socks4.protocol
+-}
+
+protoVersion = 4
+responseVersion = 0
+
+serverProtocol = do
   req <- recvMsg 
-  let defR = Response 0
+  let defR = Response responseVersion 
   -- for a reject resp or for a resp to connect request the addr field is ignored by client
   let dummyAddr = toIPv4 $ L.replicate ipv4Bytes 0
-  if (version req == 4)
+  if (version req == protoVersion)
   then return $ ProxyAction (cmd req) (Right (IPv4 $ remoteIP req), remotePort req)
         $ \case
             Just (IPv4 ip, port) -> sendMsg $ defR RequestGranted ip port
@@ -25,6 +34,16 @@ protocol = do
                sendMsg $ defR RequestRejected dummyAddr 0
                throwException ConnectionFailed
   else sendMsg (defR RequestRejected dummyAddr 0) >> throwException HandshakeException
+
+clientProtocol (remoteIP,  port) command = do
+  sendMsg $ Request protoVersion command port remoteIP "irrelevant"
+  response <- recvMsg 
+  let valid = respVersion response == responseVersion && (code response == RequestGranted)
+  when (not valid) $ throwException ConnectionFailed
+  case command of
+    CONNECT -> return Nothing
+    BIND -> return $ Just (respIP response, respPort response)
+  
 
 data Request = Request {
     version :: Word8
@@ -35,7 +54,7 @@ data Request = Request {
  }
 
 -- identd behaviour not implemented
-data ResultCode = RequestGranted | RequestRejected 
+data ResultCode = RequestGranted | RequestRejected  deriving (Show, Eq)
 data Response = Response { respVersion :: Word8, code :: ResultCode
                          , respIP :: IPv4, respPort :: Word16}
 

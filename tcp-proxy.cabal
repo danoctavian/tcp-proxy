@@ -17,7 +17,8 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     
-    Network.TCP.Proxy
+    Network.TCP.Proxy.Server
+    Network.TCP.Proxy.Client
     Network.TCP.Proxy.Socks4
   other-modules:       
     Network.TCP.Proxy.Common
@@ -26,7 +27,7 @@ library
   build-depends:       base >=4.7 && <4.8
                      , network ==2.6.*
                      , bytestring == 0.10.4.*
-                     , transformers ==0.4.1.*
+                     , transformers ==0.4.*
                      , hslogger ==1.2.6.*
                      , conduit ==1.2.3.*
                      , conduit-extra ==1.1.4.*

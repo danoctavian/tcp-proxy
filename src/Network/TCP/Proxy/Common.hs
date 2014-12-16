@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings, DeriveDataTypeable #-}
+
 module Network.TCP.Proxy.Common where
 
 import Data.Serialize
@@ -6,14 +8,22 @@ import Data.List as L
 import Data.Serialize
 import Network.Socket as NS
 import Control.Applicative
-import Data.Word
 import Data.ByteString as BS
+import Data.Typeable
+import Control.Exception
+import Data.Word
 
 -- Currently the proxy only supports CONNECT commands
 -- TODO: implement BIND support
 data Command = CONNECT | BIND
   deriving Show
 
+data ProxyException = HandshakeException | UnsupportedFeature
+                    | ConnectionFailed
+  deriving (Show, Typeable)
+instance Exception ProxyException
+
+type PortNum = Word16
 ipv4Bytes = 4
 
 -- using network byte order (big endian)
@@ -40,3 +50,25 @@ byte w = do
     if x == w
         then getWord8
         else fail $ "Expected byte: '" ++ show w ++ "' got: '" ++ show x ++ "'"
+
+-- other utils
+hoistEitherIO (Left e) = throwIO e
+hoistEitherIO (Right v) = return v
+
+try' :: IO a -> IO (Either SomeException a)
+try' = try
+
+toIP (SockAddrInet (PortNum p) a)
+  = (IPv4 .fromRight . decode . runPut . putWord32be $ a, p)
+toIP (SockAddrInet6 (PortNum p) _ a _) = undefined -- (IPv6 $ toIPv4 $ , p)
+
+showAddr (Left host) = host
+showAddr (Right ip) = show ip
+
+mapLeft f (Left v) = Left $ f v
+mapLeft f (Right v) = (Right v)
+
+fromRight (Right v) = v
+
+eitherToMaybe (Left _) = Nothing
+eitherToMaybe (Right v) = Just v

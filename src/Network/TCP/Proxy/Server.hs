@@ -1,6 +1,6 @@
-{-# LANGUAGE OverloadedStrings, DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module Network.TCP.Proxy (
+module Network.TCP.Proxy.Server (
     run
   , Command (..)
   , DataHooks (..)
@@ -39,7 +39,6 @@ import Data.ByteString.Char8 as DBC
   Proxy with hooks on connection and on incoming/outgoing data
 -}
 
-type PortNum = Word16
 data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
 type DataHook = ByteString -> IO ByteString
 
@@ -60,11 +59,6 @@ data ProxyAction = ProxyAction {
    -- Nothing means it failed
   , onConnection :: (Maybe (IP, PortNum) -> Protocol ProxyException ())
  } 
-
-data ProxyException = HandshakeException | UnsupportedFeature
-                    | ConnectionFailed 
-  deriving (Show, Typeable)
-instance Exception ProxyException
 
 logger = "tcp-proxy"
 
@@ -109,24 +103,4 @@ handleConn config appData = do
 
 pipeWithHook hook src dest = src $$+- (CL.mapM hook) =$ dest
 
--- utils
-hoistEitherIO (Left e) = throwIO e
-hoistEitherIO (Right v) = return v
 
-try' :: IO a -> IO (Either SomeException a)
-try' = try
-
-toIP (SockAddrInet (PortNum p) a)
-  = (IPv4 .fromRight . decode . runPut . putWord32be $ a, p)
-toIP (SockAddrInet6 (PortNum p) _ a _) = undefined -- (IPv6 $ toIPv4 $ , p)
-
-showAddr (Left host) = host
-showAddr (Right ip) = show ip
-
-mapLeft f (Left v) = Left $ f v
-mapLeft f (Right v) = (Right v)
-
-fromRight (Right v) = v
-
-eitherToMaybe (Left _) = Nothing
-eitherToMaybe (Right v) = Just v
