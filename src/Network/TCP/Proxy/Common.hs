@@ -33,7 +33,8 @@ instance Serialize IPv4 where
 
 instance Serialize Command where
   get = (byte 1 *> return CONNECT) <|> (byte 2 *> return BIND)
-  put = undefined
+  put CONNECT = putWord8 1 
+  put BIND = putWord8 2
 
 -- serialize utils
 bsTakeWhile p = fmap (BS.pack . L.reverse) $ go []

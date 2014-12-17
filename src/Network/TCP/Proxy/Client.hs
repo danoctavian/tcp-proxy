@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Network.TCP.Proxy.Client where
 
 import Data.Streaming.Network
@@ -22,8 +24,3 @@ runProxyTCPClient host port handshake handle = do
     remoteConn <- hoistEitherIO handshakeResult
     handle appData postHSSrc remoteConn
         
-    
-    
-
-  
-

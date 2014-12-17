@@ -42,7 +42,7 @@ clientProtocol (remoteIP,  port) command = do
   when (not valid) $ throwException ConnectionFailed
   case command of
     CONNECT -> return Nothing
-    BIND -> return $ Just (respIP response, respPort response)
+    BIND -> return $ Just (IPv4 $ respIP response, respPort response)
   
 
 data Request = Request {
@@ -61,14 +61,15 @@ data Response = Response { respVersion :: Word8, code :: ResultCode
 instance Serialize ResultCode where
   put RequestGranted = putWord8 90
   put RequestRejected = putWord8 91
-  get = undefined
+  get = (byte 90 *> return RequestGranted) <|> (byte 91 *> return RequestRejected)
 
 instance Serialize Response where
   put (Response v code ip port) = put v >> put code >> put ip >> putWord16be port
-  get = undefined
+  get = Response <$> get <*> get <*> get <*> getWord16be
 
 instance Serialize Request where
+  put (Request v cmd p ip uid)
+    = put v >> put cmd >> putWord16be p >> put ip >> putByteString uid >> putWord8 0
   get = Request <$> get <*> get <*> getWord16be <*> get <*> bsTakeWhile (/= 0)
-  put = undefined
 
 

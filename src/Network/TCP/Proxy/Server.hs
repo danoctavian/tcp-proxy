@@ -103,4 +103,3 @@ handleConn config appData = do
 
 pipeWithHook hook src dest = src $$+- (CL.mapM hook) =$ dest
 
-
