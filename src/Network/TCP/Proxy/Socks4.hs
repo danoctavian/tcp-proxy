@@ -1,5 +1,9 @@
 {-# LANGUAGE ExistentialQuantification, RankNTypes, LambdaCase, OverloadedStrings #-}
-module Network.TCP.Proxy.Socks4 where
+module Network.TCP.Proxy.Socks4 (
+    serverProtocol
+  , clientProtocol 
+  , Command (..)
+) where
 
 import Network.TCP.Proxy.Server hiding (remoteAddr)
 import Data.List as L
