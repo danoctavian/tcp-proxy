@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes #-}
 
 module Network.TCP.Proxy.Client where
 
@@ -15,12 +15,12 @@ import Data.Conduit
 type RemoteConn = Maybe (IP, PortNum)
 
 runProxyTCPClient :: ByteString -> PortNum -> Protocol ProxyException (RemoteConn)
-       -> (AppData -> ResumableSource IO ByteString  -> RemoteConn -> IO a) -> IO a
+       -> (Consumer ByteString IO () -> ResumableSource IO ByteString  -> RemoteConn -> IO a) -> IO a
 runProxyTCPClient host port handshake handle = do
   runTCPClient (clientSettings (fromIntegral port) host) $ \appData -> do
     let resSrc = newResumableSource $ appSource appData
     let sink = appSink appData
     (postHSSrc, handshakeResult) <- fuseProtocol resSrc sink handshake
     remoteConn <- hoistEitherIO handshakeResult
-    handle appData postHSSrc remoteConn
+    handle (appSink appData) postHSSrc remoteConn
         
