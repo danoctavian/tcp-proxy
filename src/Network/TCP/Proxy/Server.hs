@@ -40,7 +40,7 @@ import Data.ByteString.Char8 as DBC
 -}
 
 data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
-type DataHook = ByteString -> IO ByteString
+type DataHook = Conduit ByteString IO ByteString
 
 type InitHook = (IP, PortNum) -> (IP, PortNum) -> IO DataHooks 
 
@@ -101,5 +101,5 @@ handleConn config appData = do
         return ()
        ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
 
-pipeWithHook hook src dest = src $$+- (CL.mapM hook) =$ dest
+pipeWithHook hook src dest = src $$+- hook =$ dest
 
