@@ -73,3 +73,4 @@ fromRight (Right v) = v
 
 eitherToMaybe (Left _) = Nothing
 eitherToMaybe (Right v) = Just v
+

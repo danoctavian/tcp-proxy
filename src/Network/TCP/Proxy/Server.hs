@@ -8,6 +8,7 @@ module Network.TCP.Proxy.Server (
   , Config (..)
   , ProxyAction (..)
   , ProxyException (..)
+  , runSimpleProxy
 ) where
 
 import Prelude as P
@@ -22,7 +23,7 @@ import Data.Serialize as DS
 import Control.Monad.NetworkProtocol
 import Control.Monad.NetworkProtocol.Conduit
 import Control.Concurrent.Async
-import Data.Conduit
+import Data.Conduit 
 import Data.Conduit.List as CL
 
 import Data.Conduit.Network
@@ -39,7 +40,10 @@ import Data.ByteString.Char8 as DBC
   Proxy with hooks on connection and on incoming/outgoing data
 -}
 
-data DataHooks = DataHooks {incoming :: DataHook, outgoing :: DataHook}
+data DataHooks = DataHooks { incoming :: DataHook
+                           , outgoing :: DataHook
+                           , onDisconnect :: IO ()
+                         }
 type DataHook = Conduit ByteString IO ByteString
 
 type InitHook = (IP, PortNum) -> (IP, PortNum) -> IO DataHooks 
@@ -98,8 +102,20 @@ handleConn config appData = do
         -- proxy data
         concurrently (pipeWithHook (outgoing dataHooks)  postConnSrc serverSink)
                      (pipeWithHook (incoming dataHooks) serverSrc clientSink)
+          `finally` (onDisconnect dataHooks)
+        
         return ()
        ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
 
 pipeWithHook hook src dest = src $$+- hook =$ dest
+
+runSimpleProxy proto = do
+  updateGlobalLogger logger (setLevel DEBUG)
+  run $  Config { proxyPort = 1080
+          , initHook = \_ _ -> return DataHooks { incoming = CL.map P.id
+                                                , outgoing = CL.map P.id
+                                                , onDisconnect = return ()
+                                               }
+          , handshake = proto 
+     }
 
