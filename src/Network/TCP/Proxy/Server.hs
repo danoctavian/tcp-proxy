@@ -8,7 +8,6 @@ module Network.TCP.Proxy.Server (
   , Config (..)
   , ProxyAction (..)
   , ProxyException (..)
-  , runSimpleProxy
 ) where
 
 import Prelude as P
@@ -108,14 +107,4 @@ handleConn config appData = do
        ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
 
 pipeWithHook hook src dest = src $$+- hook =$ dest
-
-runSimpleProxy proto = do
-  updateGlobalLogger logger (setLevel DEBUG)
-  run $  Config { proxyPort = 1080
-          , initHook = \_ _ -> return DataHooks { incoming = CL.map P.id
-                                                , outgoing = CL.map P.id
-                                                , onDisconnect = return ()
-                                               }
-          , handshake = proto 
-     }
 

@@ -60,7 +60,7 @@ try' :: IO a -> IO (Either SomeException a)
 try' = try
 
 toIP (SockAddrInet (PortNum p) a)
-  = (IPv4 .fromRight . decode . runPut . putWord32be $ a, p)
+  = (IPv4 .fromRight . decode . runPut . putWord32host $ a, p)
 toIP (SockAddrInet6 (PortNum p) _ a _) = undefined -- (IPv6 $ toIPv4 $ , p)
 
 showAddr (Left host) = host
