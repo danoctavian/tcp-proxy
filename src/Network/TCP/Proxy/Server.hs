@@ -8,6 +8,8 @@ module Network.TCP.Proxy.Server (
   , Config (..)
   , ProxyAction (..)
   , ProxyException (..)
+  , logger
+  , RemoteAddr
 ) where
 
 import Prelude as P
@@ -34,6 +36,9 @@ import Data.IP
 import Data.Streaming.Network
 import Network.TCP.Proxy.Common
 import Data.ByteString.Char8 as DBC
+import Control.Monad
+
+import Data.Map.Strict as Map
 
 {-
   Proxy with hooks on connection and on incoming/outgoing data
@@ -51,6 +56,10 @@ data Config = Config {
               proxyPort :: PortNum 
             , initHook :: InitHook
             , handshake :: Protocol ProxyException ProxyAction
+
+              --  redirect connections contained in the map
+              -- to the specified value
+            , redirects :: Map RemoteAddr RemoteAddr 
             }
 
 type RemoteAddr = (Either HostName IP, PortNum)
@@ -82,7 +91,9 @@ handleConn config appData = do
     BIND -> do
       throwIO UnsupportedFeature
     CONNECT -> do
-      let remote = remoteAddr proxyAction
+      let remote =  maybe (remoteAddr proxyAction) id
+                          (Map.lookup (remoteAddr proxyAction) (redirects config))
+                         
       debugM logger $ "attempting connect to " P.++ (show remote)
       connResult <- try' $ getSocketTCP
                     (DBC.pack . showAddr . fst $ remote) (fromIntegral . snd $ remote)
