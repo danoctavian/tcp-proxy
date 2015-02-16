@@ -110,7 +110,7 @@ handleConn config appData = do
          -- setup hooks
         dataHooks <- initHook config (toIP $ appSockAddr appData) (toIP $ addrInfo)
         -- proxy data
-        concurrently (pipeWithHook (outgoing dataHooks)  postConnSrc serverSink)
+        race_ (pipeWithHook (outgoing dataHooks)  postConnSrc serverSink)
                      (pipeWithHook (incoming dataHooks) serverSrc clientSink)
           `finally` (onDisconnect dataHooks)
         

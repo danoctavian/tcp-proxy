@@ -45,6 +45,20 @@ library
   default-language:    Haskell2010
 
 
+executable simple-proxy 
+  hs-source-dirs:   simple-proxy
+  main-is:          Main.hs
+  other-modules:
+  build-depends:
+      base >= 4.7 && < 4.8
+    , tcp-proxy
+    , bytestring
+    , conduit >=1.2.3 && <1.3
+    , conduit-extra >=1.1.4 && <1.2
+    , hslogger >=1.2.6 && <1.3
+    , containers >=0.5.5 && <0.6
+
+
 Test-Suite spec
     Main-Is:         Spec.hs
     Other-modules:
