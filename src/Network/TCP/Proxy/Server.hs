@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Network.TCP.Proxy.Server (
     run
@@ -10,6 +11,7 @@ module Network.TCP.Proxy.Server (
   , ProxyException (..)
   , logger
   , RemoteAddr
+  , directTCPConn
 ) where
 
 import Prelude as P
@@ -52,13 +54,22 @@ type DataHook = Conduit ByteString IO ByteString
 
 type InitHook = (IP, PortNum) -> (IP, PortNum) -> IO DataHooks 
 
+type AppSource = Producer IO ByteString
+type AppSink = Consumer ByteString IO ()
+
+type MakeConn = RemoteAddr -> (AppSource -> AppSink -> (IP, PortNum) -> IO()) -> IO ()
+
 data Config = Config {
               proxyPort :: PortNum 
             , initHook :: InitHook
             , handshake :: Protocol ProxyException ProxyAction
 
+              -- the remote connect operation (customizable)
+            , makeConn :: MakeConn
+
               --  redirect connections contained in the map
               -- to the specified value
+              -- TODO: remove this and leave it to the customizable connect Op (?)
             , redirects :: Map RemoteAddr RemoteAddr 
             }
 
@@ -84,6 +95,7 @@ handleConn :: Config -> AppData -> IO ()
 handleConn config appData = do
   let clientSrc = (newResumableSource $ appSource appData)
   let clientSink = appSink appData
+  debugM logger $ "handling conn..."
   (postHSSrc, handshakeResult) <- fuseProtocol clientSrc clientSink (handshake config)
   proxyAction <- hoistEitherIO handshakeResult
 
@@ -95,27 +107,32 @@ handleConn config appData = do
                           (Map.lookup (remoteAddr proxyAction) (redirects config))
                          
       debugM logger $ "attempting connect to " P.++ (show remote)
-      connResult <- try' $ getSocketTCP
-                    (DBC.pack . showAddr . fst $ remote) (fromIntegral . snd $ remote)
-      (do
-        -- perform protocol given connect outcome
-        (postConnSrc, afterConn) <- fuseProtocol postHSSrc clientSink 
-              (onConnection proxyAction $ eitherToMaybe $ fmap (toIP .  snd) connResult)
-        hoistEitherIO afterConn
 
-        (socket, addrInfo) <- hoistEitherIO  connResult
-        debugM logger $ "succesfully connected to " P.++ (show addrInfo)
-        let serverSrc = newResumableSource  $ sourceSocket socket
-        let serverSink = sinkSocket socket
-         -- setup hooks
-        dataHooks <- initHook config (toIP $ appSockAddr appData) (toIP $ addrInfo)
-        -- proxy data
-        race_ (pipeWithHook (outgoing dataHooks)  postConnSrc serverSink)
-                     (pipeWithHook (incoming dataHooks) serverSrc clientSink)
-          `finally` (onDisconnect dataHooks)
-        
-        return ()
-       ) `finally`  (hoistEitherIO connResult >>= NS.close . fst )
+      handle
+        (\ConnectionFailed -> -- when connection fails inform the client
+           void $ fuseProtocol postHSSrc clientSink (onConnection proxyAction Nothing))
+        (makeConn config remote $ \serverSrc serverSink ip -> do
+          (postConnSrc, afterConn) <-
+            fuseProtocol postHSSrc clientSink (onConnection proxyAction (Just ip))
+          hoistEitherIO afterConn
+          debugM logger $ "succesfully connected to " P.++ (show ip)
 
-pipeWithHook hook src dest = src $$+- hook =$ dest
+          dataHooks <- initHook config (toIP $ appSockAddr appData) ip 
 
+          -- proxy with hooks
+          race_ (postConnSrc $$+- (outgoing dataHooks) =$ serverSink)
+                (serverSrc =$ (incoming dataHooks) $$ clientSink)
+            `finally` (onDisconnect dataHooks)
+          return ()        
+        ) 
+
+directTCPConn :: MakeConn
+directTCPConn remote handler = do
+  bracket
+    (handleAll (\e -> throwIO ConnectionFailed) $
+      getSocketTCP (DBC.pack . showAddr . fst $ remote) (fromIntegral . snd $ remote))
+    (NS.close . fst)
+    (\(socket, addrInfo) -> do
+      handler (toProducer $ sourceSocket socket) (toConsumer $ sinkSocket socket)
+              (toIP addrInfo)
+    )

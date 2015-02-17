@@ -14,6 +14,8 @@ main = do
   runSimpleProxy
 
 runSimpleProxy = do
+  debugM logger "starting simple proxy"
+
   Proxy.run $  Proxy.Config { Proxy.proxyPort = 1080
           , Proxy.initHook = \_ _ -> do
             debugM logger "wtf this ran now"
@@ -24,6 +26,7 @@ runSimpleProxy = do
                             debugM Proxy.logger "disconnect happened"             
                       }
           , Proxy.handshake = Socks4.serverProtocol
+          , Proxy.makeConn = Proxy.directTCPConn
           , Proxy.redirects = Map.empty
      }
 
