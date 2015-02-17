@@ -12,6 +12,9 @@ module Network.TCP.Proxy.Server (
   , logger
   , RemoteAddr
   , directTCPConn
+  , toIP
+  , initNoOpHook
+  , ProxyException (..)
 ) where
 
 import Prelude as P
@@ -128,3 +131,11 @@ directTCPConn remote handler = do
       handler (toProducer $ sourceSocket socket) (toConsumer $ sinkSocket socket)
               (toIP addrInfo)
     )
+
+-- a hook that does nothing
+initNoOpHook :: InitHook
+initNoOpHook _ _ = return $ DataHooks {
+                      incoming = CL.map P.id
+                    , outgoing = CL.map P.id
+                    , onDisconnect = return ()  
+              }

@@ -31,6 +31,12 @@ instance Serialize IPv4 where
   get = toIPv4 . L.map fromIntegral . BS.unpack <$> getByteString ipv4Bytes
   put = putByteString . BS.pack . L.map fromIntegral . fromIPv4
 
+-- WARNING: THIS IS PROBABLY WRONG. (it's not what other proxies expect)
+-- TODO: correct
+instance Serialize IPv6 where
+  get = toIPv6 . L.map fromIntegral . BS.unpack <$> getByteString ipv4Bytes
+  put = putByteString . BS.pack . L.map fromIntegral . fromIPv6
+
 instance Serialize Command where
   get = (byte 1 *> return CONNECT) <|> (byte 2 *> return BIND)
   put CONNECT = putWord8 1 
