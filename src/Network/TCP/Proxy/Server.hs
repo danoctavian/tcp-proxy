@@ -66,11 +66,6 @@ data Config = Config {
 
               -- the remote connect operation (customizable)
             , makeConn :: MakeConn
-
-              --  redirect connections contained in the map
-              -- to the specified value
-              -- TODO: remove this and leave it to the customizable connect Op (?)
-            , redirects :: Map RemoteAddr RemoteAddr 
             }
 
 type RemoteAddr = (Either HostName IP, PortNum)
@@ -103,11 +98,8 @@ handleConn config appData = do
     BIND -> do
       throwIO UnsupportedFeature
     CONNECT -> do
-      let remote =  maybe (remoteAddr proxyAction) id
-                          (Map.lookup (remoteAddr proxyAction) (redirects config))
-                         
+      let remote = remoteAddr proxyAction
       debugM logger $ "attempting connect to " P.++ (show remote)
-
       handle
         (\ConnectionFailed -> -- when connection fails inform the client
            void $ fuseProtocol postHSSrc clientSink (onConnection proxyAction Nothing))

@@ -27,7 +27,6 @@ runSimpleProxy = do
                       }
           , Proxy.handshake = Socks4.serverProtocol
           , Proxy.makeConn = Proxy.directTCPConn
-          , Proxy.redirects = Map.empty
      }
 
 
