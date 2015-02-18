@@ -15,6 +15,7 @@ import Data.Text
 import Control.Monad
 import Control.Monad.Trans.Resource
 import Control.Monad.IO.Class
+import Control.Concurrent.Async as Async
 
 import Control.Concurrent
 
@@ -27,6 +28,7 @@ simpleProxyConfig p =  Proxy.Config { proxyPort = p
                                                   , onDisconnect = return ()
                                                  }
             , handshake = Socks4.serverProtocol
+            , makeConn = directTCPConn
        }
 
 main :: IO ()
@@ -45,10 +47,10 @@ runFetchTest = do
   let serverPort = 3333
   let proxyPort = 1080
   let app = staticApp $ defaultWebAppSettings (fromText root)
-  allocateThread $ forkIO $ Warp.run serverPort app
-  allocateThread $ forkIO $ Proxy.run $ simpleProxyConfig proxyPort
+
+  allocateAsync $ async $ Warp.run serverPort app
+  allocateAsync $ async $ Proxy.run $ simpleProxyConfig proxyPort
   
-  liftIO $ threadDelay $ 10 ^ 8
   liftIO $ forM ["tinyFile.txt"] $ \fileName -> do
     let fullPath = (fromText root) </> (fromText fileName)
     contents <- liftIO $ P.readFile (unpack $ fromRight $ toText fullPath)
@@ -61,4 +63,4 @@ runFetchTest = do
 
 fromRight (Right v) = v
 
-allocateThread t = allocate t (\tid -> killThread tid)
+allocateAsync runAsync = allocate runAsync (\a -> Async.cancel a)
